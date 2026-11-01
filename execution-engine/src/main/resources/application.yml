@@ -1,0 +1,11 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: execution-engine
+
+execution:
+  timeout-seconds: 10
+  memory-limit-mb: 256
+  cpu-quota: 100000 # 1 core limit

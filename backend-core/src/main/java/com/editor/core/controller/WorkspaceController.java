@@ -1,0 +1,71 @@
+package com.editor.core.controller;
+
+import com.editor.core.dto.CreateWorkspaceRequest;
+import com.editor.core.dto.WorkspaceDto;
+import com.editor.core.model.document.DocumentSnapshot;
+import com.editor.core.service.DocumentSyncService;
+import com.editor.core.service.WorkspaceService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/workspaces")
+@RequiredArgsConstructor
+public class WorkspaceController {
+
+    private final WorkspaceService workspaceService;
+    private final DocumentSyncService documentSyncService;
+
+    @PostMapping
+    public ResponseEntity<WorkspaceDto> createWorkspace(
+            @Valid @RequestBody CreateWorkspaceRequest request,
+            Authentication authentication) {
+        return ResponseEntity.ok(workspaceService.createWorkspace(request, authentication.getName()));
+    }
+
+    @GetMapping
+    public ResponseEntity<List<WorkspaceDto>> getUserWorkspaces(Authentication authentication) {
+        return ResponseEntity.ok(workspaceService.getUserWorkspaces(authentication.getName()));
+    }
+
+    @GetMapping("/{workspaceId}")
+    public ResponseEntity<WorkspaceDto> getWorkspace(
+            @PathVariable String workspaceId,
+            Authentication authentication) {
+        return ResponseEntity.ok(workspaceService.getWorkspaceById(workspaceId, authentication.getName()));
+    }
+
+    @GetMapping("/{workspaceId}/snapshot")
+    public ResponseEntity<?> getSnapshot(
+            @PathVariable String workspaceId,
+            @RequestParam(defaultValue = "main") String docName) {
+        return documentSyncService.getLatestSnapshot(workspaceId, docName)
+                .map(s -> ResponseEntity.ok(Map.of(
+                        "workspaceId", s.getWorkspaceId(),
+                        "documentName", s.getDocumentName(),
+                        "yjsStateBase64", Base64.getEncoder().encodeToString(s.getYjsState()),
+                        "updatedAt", s.getUpdatedAt()
+                )))
+                .orElse(ResponseEntity.noContent().build());
+    }
+
+    @PostMapping("/{workspaceId}/snapshot")
+    public ResponseEntity<?> saveSnapshot(
+            @PathVariable String workspaceId,
+            @RequestParam(defaultValue = "main") String docName,
+            @RequestBody Map<String, String> body) {
+        String base64State = body.get("yjsStateBase64");
+        if (base64State != null) {
+            byte[] state = Base64.getDecoder().decode(base64State);
+            documentSyncService.saveSnapshot(workspaceId, docName, state);
+        }
+        return ResponseEntity.ok(Map.of("status", "saved"));
+    }
+}
