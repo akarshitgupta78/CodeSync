@@ -20,7 +20,7 @@
 	</properties>
 
 	<dependencies>
-		<!-- Web & REST -->
+		
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-web</artifactId>
@@ -30,8 +30,22 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-validation</artifactId>
 		</dependency>
+		<dependency>
+			<groupId>jakarta.validation</groupId>
+			<artifactId>jakarta.validation-api</artifactId>
+		</dependency>
 
-		<!-- Docker Java Client for container lifecycle management -->
+		
+		<dependency>
+			<groupId>com.github.docker-java</groupId>
+			<artifactId>docker-java-api</artifactId>
+			<version>${docker-java.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>com.github.docker-java</groupId>
+			<artifactId>docker-java-transport</artifactId>
+			<version>${docker-java.version}</version>
+		</dependency>
 		<dependency>
 			<groupId>com.github.docker-java</groupId>
 			<artifactId>docker-java-core</artifactId>
@@ -43,14 +57,14 @@
 			<version>${docker-java.version}</version>
 		</dependency>
 
-		<!-- Lombok -->
+		
 		<dependency>
 			<groupId>org.projectlombok</groupId>
 			<artifactId>lombok</artifactId>
 			<optional>true</optional>
 		</dependency>
 
-		<!-- Testing -->
+		
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
