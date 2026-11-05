@@ -6,6 +6,8 @@ import com.editor.core.model.jpa.Role;
 import com.editor.core.model.jpa.User;
 import com.editor.core.model.jpa.Workspace;
 import com.editor.core.model.jpa.WorkspaceMember;
+import com.editor.core.repository.document.DocumentSnapshotRepository;
+import com.editor.core.repository.document.YjsUpdateLogRepository;
 import com.editor.core.repository.jpa.UserRepository;
 import com.editor.core.repository.jpa.WorkspaceMemberRepository;
 import com.editor.core.repository.jpa.WorkspaceRepository;
@@ -14,6 +16,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -22,16 +25,34 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class WorkspaceService {
 
+    private static final String ROOM_ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
+    private static final int ROOM_ID_LENGTH = 6;
+    private static final SecureRandom RANDOM = new SecureRandom();
+
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository memberRepository;
     private final UserRepository userRepository;
+    private final DocumentSnapshotRepository snapshotRepository;
+    private final YjsUpdateLogRepository updateLogRepository;
+
+    private String generateUniqueRoomId() {
+        String id;
+        do {
+            StringBuilder sb = new StringBuilder(ROOM_ID_LENGTH);
+            for (int i = 0; i < ROOM_ID_LENGTH; i++) {
+                sb.append(ROOM_ID_CHARS.charAt(RANDOM.nextInt(ROOM_ID_CHARS.length())));
+            }
+            id = sb.toString();
+        } while (workspaceRepository.existsById(id));
+        return id;
+    }
 
     @Transactional
     public WorkspaceDto createWorkspace(CreateWorkspaceRequest request, String username) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new IllegalArgumentException("User not found: " + username));
 
-        String workspaceId = UUID.randomUUID().toString();
+        String workspaceId = generateUniqueRoomId();
         Workspace workspace = Workspace.builder()
                 .id(workspaceId)
                 .name(request.getName().trim())
@@ -121,5 +142,31 @@ public class WorkspaceService {
                 .memberCount(ws.getMembers().size())
                 .createdAt(ws.getCreatedAt())
                 .build();
+    }
+
+    @Transactional
+    public void deleteWorkspace(String workspaceId, String username) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalArgumentException("User not found: " + username));
+
+        Workspace ws = workspaceRepository.findById(workspaceId)
+                .orElseThrow(() -> new IllegalArgumentException("Workspace not found: " + workspaceId));
+
+        boolean isOwner = ws.getOwner().getId().equals(user.getId());
+        Role role = isOwner ? Role.ADMIN :
+                memberRepository.findByWorkspaceIdAndUserId(ws.getId(), user.getId())
+                        .map(WorkspaceMember::getRole)
+                        .orElse(null);
+
+        if (!isOwner && role != Role.ADMIN) {
+            throw new AccessDeniedException("Only a workspace admin or owner can delete this workspace");
+        }
+
+        // 1. Delete associated MongoDB document snapshots & CRDT update logs
+        snapshotRepository.deleteByWorkspaceId(workspaceId);
+        updateLogRepository.deleteByWorkspaceId(workspaceId);
+
+        // 2. Delete workspace from PostgreSQL (members are cascade deleted)
+        workspaceRepository.delete(ws);
     }
 }
