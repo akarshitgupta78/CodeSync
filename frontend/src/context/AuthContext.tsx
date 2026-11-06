@@ -12,11 +12,11 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<AuthResponse | null>(null);
+  const [user, setUser] = useState<AuthResponse | null>(() => authService.getCurrentUser());
 
   useEffect(() => {
     const saved = authService.getCurrentUser();
-    if (saved) {
+    if (saved && (!user || user.userId !== saved.userId)) {
       setUser(saved);
     }
   }, []);
