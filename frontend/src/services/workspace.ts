@@ -35,6 +35,10 @@ export const workspaceService = {
     return res.data;
   },
 
+  async deleteWorkspace(id: string): Promise<void> {
+    await api.delete(`/workspaces/${id}`);
+  },
+
   async executeCode(language: string, code: string, stdin?: string): Promise<ExecutionResult> {
     const res = await axios.post<ExecutionResult>('/api/execute', { language, code, stdin });
     return res.data;
