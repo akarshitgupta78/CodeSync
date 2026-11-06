@@ -35,7 +35,8 @@
   * **MongoDB:** High-frequency unstructured writes (periodic merged CRDT binary snapshots and incremental delta logs).
 * **Multi-Node Cluster Scaling:** Uses a **Redis Pub/Sub backplane** to synchronize WebSocket events seamlessly across multiple backend instances.
 * **Sandboxed Code Execution Engine:** Safely runs arbitrary user code (Python, JavaScript/Node.js, etc.) inside ephemeral, resource-constrained Docker containers with complete network isolation (`--network none`).
-* **Modern VS Code Experience:** Integrated with **Monaco Editor**, syntax highlighting, smooth scrolling, and dark IDE aesthetics.
+* **Modern VS Code Experience:** Integrated with **Monaco Editor**, syntax highlighting, smooth scrolling, and dynamic **Dark / Light theme** toggling.
+* **Workspace Management & Access Control:** Role-aware workspace creation, 6-character room codes, deletion with cascading cleanup, and invalid room join protection.
 
 ---
 
@@ -48,7 +49,7 @@ flowchart TD
         UserB["User B (Browser)"]
     end
 
-    subgraph Core["Backend Core Cluster (Spring Boot 8080)"]
+    subgraph Core["Backend Core Cluster (Spring Boot 8082)"]
         Node1["Spring Boot Node 1<br>(WebSocket Relay)"]
         Node2["Spring Boot Node 2<br>(WebSocket Relay)"]
     end
@@ -126,11 +127,11 @@ CodeSync/
 │   │   ├── App.tsx               # Main routing & protected routes
 │   │   └── main.tsx              # React DOM entrypoint
 │   ├── package.json
-│   ├── vite.config.ts            # Proxy to ports 8080 and 8081
+│   ├── vite.config.ts            # Proxy to ports 8082 and 8081
 │   ├── tailwind.config.js
 │   └── tsconfig.json
 │
-├── backend-core/                 # Main Spring Boot 3.4.3 Application (Port 8080)
+├── backend-core/                 # Main Spring Boot 3.4.3 Application (Port 8082)
 │   ├── src/main/java/com/editor/core/
 │   │   ├── config/               # WebSocketConfig, SecurityConfig, RedisConfig
 │   │   ├── controller/           # AuthController, WorkspaceController
@@ -184,14 +185,20 @@ docker ps
 
 ### Step 2: Run the Collaboration Backend (`backend-core`)
 Open a new terminal tab and start the main Spring Boot server:
+
+> **Note:** Ensure port `8082` is free before starting.
+
 ```bash
 cd backend-core
 .\mvnw.cmd spring-boot:run
 ```
-*The backend server will start on `http://localhost:8080`.*
+*The backend server will start on `http://localhost:8082`.*
 
 ### Step 3: Run the Code Execution Engine (`execution-engine`)
 Open another terminal tab and launch the execution service:
+
+> **Note:** Ensure port `8081` is free before starting.
+
 ```bash
 cd execution-engine
 .\mvnw.cmd spring-boot:run
@@ -200,6 +207,9 @@ cd execution-engine
 
 ### Step 4: Run the Frontend Client (`frontend`)
 Open a fourth terminal tab and launch the React development server:
+
+> **Note:** Ensure port `3000` is free before starting.
+
 ```bash
 cd frontend
 npm install
@@ -226,6 +236,7 @@ Open **[http://localhost:3000](http://localhost:3000)** in your browser!
 | `GET` | `/api/workspaces` | Get all accessible workspaces | Yes |
 | `POST` | `/api/workspaces` | Create a new collaborative room | Yes |
 | `GET` | `/api/workspaces/{id}` | Get workspace details (auto-joins as collaborator) | Yes |
+| `DELETE` | `/api/workspaces/{id}` | Delete workspace and associated documents (Admin only) | Yes |
 | `GET` | `/api/workspaces/{id}/snapshot` | Fetch latest merged CRDT snapshot from MongoDB | Yes |
 | `POST` | `/api/workspaces/{id}/snapshot` | Store periodic merged CRDT snapshot | Yes |
 
@@ -238,10 +249,12 @@ Open **[http://localhost:3000](http://localhost:3000)** in your browser!
 
 * **Client Send Destinations:**
   * `/app/workspace/{workspaceId}/sync`: Sends binary base64-encoded Yjs updates.
+  * `/app/workspace/{workspaceId}/awareness`: Broadcasts Yjs awareness states (remote carets, name tags, selection ranges).
   * `/app/workspace/{workspaceId}/cursor`: Broadcasts live cursor position `(line, column)`.
   * `/app/workspace/{workspaceId}/join`: Announces collaborator presence in the room.
 * **Client Subscription Destinations:**
   * `/topic/workspace/{workspaceId}/sync`: Receives peer CRDT deltas.
+  * `/topic/workspace/{workspaceId}/awareness`: Receives peer Yjs awareness states with real-time cursor tracking.
   * `/topic/workspace/{workspaceId}/presence`: Receives real-time active users list.
   * `/topic/workspace/{workspaceId}/cursor`: Receives peer live cursor highlights.
 
