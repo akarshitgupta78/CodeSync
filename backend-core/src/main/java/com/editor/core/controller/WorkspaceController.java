@@ -23,6 +23,11 @@ public class WorkspaceController {
     private final WorkspaceService workspaceService;
     private final DocumentSyncService documentSyncService;
 
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, String>> handleIllegalArgumentException(IllegalArgumentException ex) {
+        return ResponseEntity.status(404).body(Map.of("message", ex.getMessage()));
+    }
+
     @PostMapping
     public ResponseEntity<WorkspaceDto> createWorkspace(
             @Valid @RequestBody CreateWorkspaceRequest request,
@@ -40,6 +45,14 @@ public class WorkspaceController {
             @PathVariable String workspaceId,
             Authentication authentication) {
         return ResponseEntity.ok(workspaceService.getWorkspaceById(workspaceId, authentication.getName()));
+    }
+
+    @DeleteMapping("/{workspaceId}")
+    public ResponseEntity<?> deleteWorkspace(
+            @PathVariable String workspaceId,
+            Authentication authentication) {
+        workspaceService.deleteWorkspace(workspaceId, authentication.getName());
+        return ResponseEntity.ok(Map.of("message", "Workspace deleted successfully"));
     }
 
     @GetMapping("/{workspaceId}/snapshot")
