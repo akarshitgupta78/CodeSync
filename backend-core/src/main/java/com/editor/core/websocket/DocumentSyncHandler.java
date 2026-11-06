@@ -57,6 +57,16 @@ public class DocumentSyncHandler {
     }
 
     /**
+     * Broadcasts Yjs awareness (cursor positions, selections, and user presence).
+     */
+    @MessageMapping("/workspace/{workspaceId}/awareness")
+    public void handleAwarenessMessage(
+            @DestinationVariable String workspaceId,
+            @Payload Map<String, Object> payload) {
+        messagingTemplate.convertAndSend("/topic/workspace/" + workspaceId + "/awareness", payload);
+    }
+
+    /**
      * Registers presence for a user in the workspace.
      */
     @MessageMapping("/workspace/{workspaceId}/join")
