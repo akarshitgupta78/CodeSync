@@ -59,14 +59,7 @@ public class WorkspaceController {
     public ResponseEntity<?> getSnapshot(
             @PathVariable String workspaceId,
             @RequestParam(defaultValue = "main") String docName) {
-        return documentSyncService.getLatestSnapshot(workspaceId, docName)
-                .map(s -> ResponseEntity.ok(Map.of(
-                        "workspaceId", s.getWorkspaceId(),
-                        "documentName", s.getDocumentName(),
-                        "yjsStateBase64", Base64.getEncoder().encodeToString(s.getYjsState()),
-                        "updatedAt", s.getUpdatedAt()
-                )))
-                .orElse(ResponseEntity.noContent().build());
+        return ResponseEntity.ok(documentSyncService.getInitialState(workspaceId, docName));
     }
 
     @PostMapping("/{workspaceId}/snapshot")
