@@ -10,6 +10,7 @@ import { useYjsProvider } from '../hooks/useYjsProvider';
 import { workspaceService, Workspace, ExecutionResult } from '../services/workspace';
 import * as Y from 'yjs';
 import { Check, FolderX, Plus } from 'lucide-react';
+import { uint8ArrayToBase64 } from '../utils/binary';
 
 const COLORS = [
   '#58a6ff', '#3fb950', '#bc8cff', '#d29922', '#f778ba', '#79c0ff', '#56d364'
@@ -59,25 +60,56 @@ export const EditorRoom: React.FC = () => {
       .finally(() => setLoading(false));
   }, [workspaceId]);
 
-  // Periodic CRDT snapshot saver to backend MongoDB
+  // Periodic & event-driven CRDT snapshot saver to backend MongoDB
   useEffect(() => {
     if (!workspaceId || !synced || notFound) return;
 
-    const interval = setInterval(() => {
-      const state = Y.encodeStateAsUpdate(doc);
-      const base64State = btoa(String.fromCharCode(...state));
+    const saveSnapshotNow = () => {
+      try {
+        const state = Y.encodeStateAsUpdate(doc);
+        // Never save empty or uninitialized document snapshots
+        if (state.byteLength <= 4) {
+          return;
+        }
+        const base64State = uint8ArrayToBase64(state);
 
-      fetch(`/api/workspaces/${workspaceId}/snapshot?docName=main`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
-        },
-        body: JSON.stringify({ yjsStateBase64: base64State }),
-      }).catch((e) => console.warn('Snapshot backup failed:', e));
-    }, 30000); // Snapshot every 30 seconds
+        fetch(`/api/workspaces/${workspaceId}/snapshot?docName=main`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+          },
+          body: JSON.stringify({ yjsStateBase64: base64State }),
+          keepalive: true, // Ensures request completes even if user refreshes or closes the tab
+        }).catch((e) => console.warn('Snapshot backup failed:', e));
+      } catch (e) {
+        console.error('Failed to create CRDT snapshot:', e);
+      }
+    };
 
-    return () => clearInterval(interval);
+    // Backup snapshot every 15 seconds
+    const interval = setInterval(saveSnapshotNow, 15000);
+
+    // Debounced snapshot 1.5s after local document edits
+    let debounceTimer: any = null;
+    const handleDocUpdate = (_: Uint8Array, origin: any) => {
+      if (origin !== 'remote' && origin !== 'initial-sync') {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(saveSnapshotNow, 1500);
+      }
+    };
+    doc.on('update', handleDocUpdate);
+
+    // Save snapshot on browser refresh / page close
+    window.addEventListener('beforeunload', saveSnapshotNow);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(debounceTimer);
+      window.removeEventListener('beforeunload', saveSnapshotNow);
+      doc.off('update', handleDocUpdate);
+      saveSnapshotNow();
+    };
   }, [workspaceId, doc, synced, notFound]);
 
   const handleRunCode = async () => {
@@ -157,7 +189,7 @@ export const EditorRoom: React.FC = () => {
           </div>
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Workspace Not Found</h2>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-2 max-w-md leading-relaxed">
-            The room with ID <span className="font-mono font-semibold text-accent-blue bg-accent-blue/10 px-2 py-0.5 rounded">"{workspaceId}"</span> does not exist. No room has been created with this code.
+            The room with ID <span className="font-mono font-semibold text-accent-blue bg-accent-blue/10 px-2 py-0.5 rounded">"{workspaceId}"</span> does not exist. Please create new workspace.
           </p>
 
           <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
@@ -239,13 +271,6 @@ export const EditorRoom: React.FC = () => {
               Room link copied to clipboard!
             </span>
           )}
-        </div>
-
-        <div className="flex items-center gap-2 text-xs">
-          <span className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-100 dark:bg-dark-700 border border-slate-200 dark:border-dark-600 text-slate-700 dark:text-slate-300">
-            <span className="w-2 h-2 rounded-full bg-accent-green animate-pulse"></span>
-            CRDT Connected
-          </span>
         </div>
       </div>
 
