@@ -18,9 +18,81 @@ html.dark body {
   color: #e6edf3;
 }
 
+/* Light Cream Default Theme */
 html.light body {
-  background-color: #f6f8fa;
-  color: #1f2328;
+  background-color: #FAF7F0;
+  color: #2D2823;
+}
+
+html.light .bg-slate-50 {
+  background-color: #FAF7F0 !important;
+}
+
+html.light .bg-white {
+  background-color: #FFFDF9 !important;
+}
+
+html.light .border-slate-200 {
+  border-color: #E8E0D1 !important;
+}
+
+html.light .border-slate-300 {
+  border-color: #DDD2BF !important;
+}
+
+html.light .bg-slate-100 {
+  background-color: #F5EFE4 !important;
+}
+
+html.light .hover\:bg-slate-200:hover {
+  background-color: #ECE4D6 !important;
+}
+
+html.light .text-slate-900 {
+  color: #25211D !important;
+}
+
+html.light .text-slate-800 {
+  color: #2D2823 !important;
+}
+
+html.light .text-slate-700 {
+  color: #4A433D !important;
+}
+
+html.light .text-slate-600 {
+  color: #6E655C !important;
+}
+
+html.light .text-slate-500 {
+  color: #8C8276 !important;
+}
+
+/* Chrome / Safari / Edge Autofill Theme Overrides */
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus, 
+input:-webkit-autofill:active {
+  -webkit-background-clip: text;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+html.dark input:-webkit-autofill,
+html.dark input:-webkit-autofill:hover, 
+html.dark input:-webkit-autofill:focus, 
+html.dark input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #0d1117 inset !important;
+  -webkit-text-fill-color: #e6edf3 !important;
+  caret-color: #e6edf3 !important;
+}
+
+html.light input:-webkit-autofill,
+html.light input:-webkit-autofill:hover, 
+html.light input:-webkit-autofill:focus, 
+html.light input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #FAF7F0 inset !important;
+  -webkit-text-fill-color: #2D2823 !important;
+  caret-color: #2D2823 !important;
 }
 
 /* Custom Scrollbars */
@@ -46,23 +118,11 @@ html.light ::-webkit-scrollbar-thumb:hover {
   background: #afb8c1;
 }
 
-/* Remote Cursor Animations */
-.yRemoteSelection {
-  background-color: rgba(88, 166, 255, 0.25);
-}
+/* Remote Cursor and Selection styling disabled */
+.yRemoteSelection,
 .yRemoteSelectionHead {
-  position: absolute;
-  border-left: 2px solid #58a6ff;
-  border-top: 2px solid #58a6ff;
-  border-bottom: 2px solid #58a6ff;
-  height: 100%;
-  box-sizing: border-box;
-}
-.yRemoteSelectionHead::after {
-  position: absolute;
-  content: ' ';
-  border: 3px solid #58a6ff;
-  border-radius: 4px;
-  left: -4px;
-  top: -5px;
+  display: none !important;
+  background-color: transparent !important;
+  border: none !important;
+  outline: none !important;
 }
