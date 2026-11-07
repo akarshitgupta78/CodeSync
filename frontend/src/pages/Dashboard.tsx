@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Navbar } from '../components/common/Navbar';
 import { workspaceService, Workspace } from '../services/workspace';
-import { Plus, Users, ArrowUpRight, FolderGit2, Calendar, Sparkles, Trash2, AlertCircle } from 'lucide-react';
+import { Plus, Users, ArrowUpRight, FolderGit2, Calendar, Trash2, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export const Dashboard: React.FC = () => {
@@ -77,7 +77,7 @@ export const Dashboard: React.FC = () => {
       await workspaceService.getWorkspaceById(roomId);
       navigate(`/workspace/${roomId}`);
     } catch (err: any) {
-      setJoinError(`Room "${roomId}" does not exist. No room has been created with this code.`);
+      setJoinError(`Room "${roomId}" does not exist. Please create new workspace.`);
     } finally {
       setJoining(false);
     }
@@ -91,13 +91,9 @@ export const Dashboard: React.FC = () => {
         {/* Welcome Banner */}
         <div className="relative overflow-hidden bg-white dark:bg-gradient-to-r dark:from-dark-800 dark:to-dark-700 border border-slate-200 dark:border-dark-600 rounded-2xl p-8 mb-8 shadow-sm dark:shadow-xl transition-colors">
           <div className="relative z-10 max-w-xl">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-accent-blue/10 border border-accent-blue/30 text-accent-blue text-xs font-semibold rounded-full mb-3">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Real-Time Collaborative CRDT Environment</span>
-            </div>
             <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">Your Workspaces</h2>
             <p className="text-sm text-slate-600 dark:text-slate-300 mt-2 leading-relaxed">
-              Create an isolated project or join an existing session to code together simultaneously with live keystrokes, remote cursors, and secure Docker execution.
+              Code, collaborate, and run ideas in real time with your team.
             </p>
 
             <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -131,21 +127,9 @@ export const Dashboard: React.FC = () => {
             </div>
 
             {joinError && (
-              <div className="mt-4 p-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-red-600 dark:text-red-400 animate-fade-in">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                  <span>{joinError}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setJoinError(null);
-                    setShowModal(true);
-                  }}
-                  className="px-3 py-1 bg-accent-blue hover:bg-blue-600 text-white font-semibold rounded-lg transition shadow-sm shrink-0"
-                >
-                  Create New Workspace
-                </button>
+              <div className="mt-4 p-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl flex items-center gap-2 text-xs text-red-600 dark:text-red-400 animate-fade-in">
+                <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                <span>{joinError}</span>
               </div>
             )}
           </div>
