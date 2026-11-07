@@ -23,7 +23,7 @@ public class DocumentSyncHandler {
     private final WebSocketEventListener eventListener;
 
     /**
-     * Handles incoming Yjs binary/base64 updates from collaborators.
+     * Handles incoming Yjs binary/base64 updates, sync steps, and awareness from collaborators.
      */
     @MessageMapping("/workspace/{workspaceId}/sync")
     public void handleSyncMessage(
@@ -31,18 +31,22 @@ public class DocumentSyncHandler {
             @Payload Map<String, Object> payload,
             SimpMessageHeaderAccessor headerAccessor) {
 
-        String docName = (String) payload.getOrDefault("docName", "main");
-        String senderId = (String) payload.getOrDefault("senderId", "anonymous");
+        // 1. Broadcast IMMEDIATELY to all collaborators in the workspace (zero latency)
+        messagingTemplate.convertAndSend("/topic/workspace/" + workspaceId + "/sync", payload);
+
+        // 2. Persist incremental update in Mongo asynchronously without blocking WebSocket broker
         String updateBase64 = (String) payload.get("update");
+        String type = (String) payload.get("type");
 
-        if (updateBase64 != null) {
-            byte[] updateBytes = Base64.getDecoder().decode(updateBase64);
-
-            // Persist incremental update in Mongo & publish to Redis for cluster scaling
-            documentSyncService.processIncomingUpdate(workspaceId, docName, senderId, updateBytes);
-
-            // Broadcast to other clients subscribed to this workspace
-            messagingTemplate.convertAndSend("/topic/workspace/" + workspaceId + "/sync", payload);
+        if (updateBase64 != null && (type == null || "update".equals(type))) {
+            String docName = (String) payload.getOrDefault("docName", "main");
+            String senderId = (String) payload.getOrDefault("senderId", "anonymous");
+            try {
+                byte[] updateBytes = Base64.getDecoder().decode(updateBase64);
+                documentSyncService.processIncomingUpdate(workspaceId, docName, senderId, updateBytes);
+            } catch (Exception e) {
+                log.warn("Failed to process incoming update payload: {}", e.getMessage());
+            }
         }
     }
 
