@@ -8,15 +8,26 @@ interface ActiveUsersListProps {
 }
 
 export const ActiveUsersList: React.FC<ActiveUsersListProps> = ({ users, currentUsername }) => {
+  // Deduplicate active sessions so opening multiple tabs doesn't spawn duplicate user badges
+  const uniqueUsers = React.useMemo(() => {
+    const map = new Map<string, PresenceUser>();
+    users.forEach((u) => {
+      if (!map.has(u.username)) {
+        map.set(u.username, u);
+      }
+    });
+    return Array.from(map.values());
+  }, [users]);
+
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 dark:bg-dark-800/80 rounded-md border border-slate-200 dark:border-dark-600 text-xs transition-colors">
       <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
         <Users className="w-3.5 h-3.5" />
-        <span>Collaborators ({users.length}):</span>
+        <span>Collaborators ({uniqueUsers.length}):</span>
       </div>
 
       <div className="flex items-center -space-x-1.5">
-        {users.map((u, i) => {
+        {uniqueUsers.map((u, i) => {
           const isYou = u.username === currentUsername;
           return (
             <div
