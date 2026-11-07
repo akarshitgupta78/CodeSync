@@ -1,8 +1,8 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Code2, LogOut, Share2, Sun, Moon } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Code2, LogOut, Share2, Sun, Moon, Home } from 'lucide-react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 
 interface NavbarProps {
   workspaceName?: string;
@@ -13,11 +13,14 @@ export const Navbar: React.FC<NavbarProps> = ({ workspaceName, onShare }) => {
   const { user, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
+
+  const isHome = location.pathname === '/';
 
   return (
     <header className="h-14 bg-white dark:bg-dark-800 border-b border-slate-200 dark:border-dark-600 px-4 flex items-center justify-between select-none transition-colors">
@@ -29,8 +32,31 @@ export const Navbar: React.FC<NavbarProps> = ({ workspaceName, onShare }) => {
           <span>CodeSync</span>
         </Link>
 
+        {/* Direct to Home Page Button between CodeSync and Workspace */}
+        {!isHome && (
+          <Link
+            to="/"
+            title="Go to Home"
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-dark-700 hover:bg-slate-200 dark:hover:bg-dark-600 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-dark-600 rounded-md text-xs font-medium transition ml-1"
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span>Home</span>
+          </Link>
+        )}
+
+        {/* Share Room Button between Home Button and Workspace */}
+        {onShare && (
+          <button
+            onClick={onShare}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-dark-700 hover:bg-slate-200 dark:hover:bg-dark-600 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-dark-600 rounded-md text-xs font-medium transition"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            <span>Share Room</span>
+          </button>
+        )}
+
         {workspaceName && (
-          <div className="flex items-center gap-2 ml-4 pl-4 border-l border-slate-200 dark:border-dark-600 text-sm">
+          <div className="flex items-center gap-2 pl-3 border-l border-slate-200 dark:border-dark-600 text-sm">
             <span className="text-slate-500 dark:text-slate-400">Workspace:</span>
             <span className="font-semibold text-slate-800 dark:text-slate-100">{workspaceName}</span>
           </div>
@@ -51,16 +77,6 @@ export const Navbar: React.FC<NavbarProps> = ({ workspaceName, onShare }) => {
             <Moon className="w-4 h-4 text-indigo-500" />
           )}
         </button>
-
-        {onShare && (
-          <button
-            onClick={onShare}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-dark-700 hover:bg-slate-200 dark:hover:bg-dark-600 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-dark-600 rounded-md text-xs font-medium transition"
-          >
-            <Share2 className="w-3.5 h-3.5" />
-            Share Room
-          </button>
-        )}
 
         {user && (
           <div className="flex items-center gap-3">
