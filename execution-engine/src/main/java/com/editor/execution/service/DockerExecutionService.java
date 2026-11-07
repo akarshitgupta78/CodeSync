@@ -83,25 +83,31 @@ public class DockerExecutionService {
         StringBuilder stdout = new StringBuilder();
         StringBuilder stderr = new StringBuilder();
 
+        var logCallback = new ResultCallback.Adapter<Frame>() {
+            @Override
+            public void onNext(Frame item) {
+                String payload = new String(item.getPayload(), StandardCharsets.UTF_8);
+                switch (item.getStreamType()) {
+                    case STDOUT -> stdout.append(payload);
+                    case STDERR -> stderr.append(payload);
+                    default -> {}
+                }
+            }
+        };
+
         dockerClient.logContainerCmd(containerId)
                 .withStdOut(true)
                 .withStdErr(true)
                 .withFollowStream(true)
-                .exec(new ResultCallback.Adapter<Frame>() {
-                    @Override
-                    public void onNext(Frame item) {
-                        String payload = new String(item.getPayload(), StandardCharsets.UTF_8);
-                        switch (item.getStreamType()) {
-                            case STDOUT -> stdout.append(payload);
-                            case STDERR -> stderr.append(payload);
-                            default -> {}
-                        }
-                    }
-                });
+                .exec(logCallback);
 
         Integer exitCode = dockerClient.waitContainerCmd(containerId)
                 .exec(new WaitContainerResultCallback())
                 .awaitStatusCode(timeoutSeconds, TimeUnit.SECONDS);
+
+        try {
+            logCallback.awaitCompletion(2, TimeUnit.SECONDS);
+        } catch (InterruptedException ignored) {}
 
         long duration = System.currentTimeMillis() - startTime;
 
