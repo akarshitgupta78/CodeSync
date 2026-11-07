@@ -10,4 +10,5 @@ import java.util.List;
 public interface YjsUpdateLogRepository extends MongoRepository<YjsUpdateLog, String> {
     List<YjsUpdateLog> findByWorkspaceIdAndDocumentNameOrderByTimestampAsc(String workspaceId, String documentName);
     void deleteByWorkspaceId(String workspaceId);
+    void deleteByWorkspaceIdAndDocumentName(String workspaceId, String documentName);
 }
