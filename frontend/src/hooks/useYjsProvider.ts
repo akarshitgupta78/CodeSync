@@ -1,8 +1,9 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import * as Y from 'yjs';
 import { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate } from 'y-protocols/awareness';
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
+import { uint8ArrayToBase64, base64ToUint8Array } from '../utils/binary';
 
 export interface PresenceUser {
   workspaceId: string;
@@ -11,21 +12,33 @@ export interface PresenceUser {
 }
 
 export function useYjsProvider(workspaceId: string, username: string, userColor: string) {
-  const docRef = useRef<Y.Doc | null>(null);
-  if (!docRef.current) {
-    docRef.current = new Y.Doc();
-  }
-  const doc = docRef.current;
+  // Generate a unique session ID per tab/client instance so multiple tabs or users never self-ignore or drop
+  const clientSessionId = useMemo(() => {
+    return typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `client-${Math.random().toString(36).substring(2, 11)}-${Date.now()}`;
+  }, []);
 
-  const awarenessRef = useRef<Awareness | null>(null);
-  if (!awarenessRef.current) {
-    awarenessRef.current = new Awareness(doc);
+  // Manage Y.Doc and Awareness scoped per workspaceId safely without state tears
+  const docRef = useRef<Y.Doc>(new Y.Doc());
+  const awarenessRef = useRef<Awareness>(new Awareness(docRef.current));
+  const currentWorkspaceRef = useRef<string>(workspaceId);
+
+  if (currentWorkspaceRef.current !== workspaceId) {
+    docRef.current.destroy();
+    awarenessRef.current.destroy();
+    docRef.current = new Y.Doc();
+    awarenessRef.current = new Awareness(docRef.current);
+    currentWorkspaceRef.current = workspaceId;
   }
+
+  const doc = docRef.current;
   const awareness = awarenessRef.current;
 
   const [synced, setSynced] = useState(false);
   const [presenceUsers, setPresenceUsers] = useState<PresenceUser[]>([]);
   const stompClientRef = useRef<Client | null>(null);
+  const outgoingQueueRef = useRef<{ destination: string; body: string }[]>([]);
 
   // Update local awareness user state whenever username or userColor updates
   useEffect(() => {
@@ -35,119 +48,102 @@ export function useYjsProvider(workspaceId: string, username: string, userColor:
     });
   }, [awareness, username, userColor]);
 
-  // Inject dynamic styles for collaborator cursors and selection highlights
+  // Ensure any leftover remote cursor styles element is removed
   useEffect(() => {
-    let styleEl = document.getElementById('yjs-remote-cursor-styles') as HTMLStyleElement | null;
-    if (!styleEl) {
-      styleEl = document.createElement('style');
-      styleEl.id = 'yjs-remote-cursor-styles';
-      document.head.appendChild(styleEl);
+    const styleEl = document.getElementById('yjs-remote-cursor-styles');
+    if (styleEl) {
+      styleEl.remove();
     }
-
-    const updateCursorStyles = () => {
-      const states = awareness.getStates();
-      let css = '';
-      states.forEach((state: any, clientId: number) => {
-        if (state.user && state.user.color) {
-          const color = state.user.color;
-          const name = state.user.name || 'Collaborator';
-          css += `
-            .yRemoteSelection-${clientId} {
-              background-color: ${color}33 !important;
-            }
-            .yRemoteSelectionHead-${clientId} {
-              position: absolute;
-              border-left: 2px solid ${color} !important;
-              border-top: 2px solid ${color} !important;
-              border-bottom: 2px solid ${color} !important;
-              height: 100%;
-              box-sizing: border-box;
-            }
-            .yRemoteSelectionHead-${clientId}::after {
-              position: absolute;
-              content: '${name}';
-              top: -16px;
-              left: -2px;
-              font-size: 10px;
-              font-family: inherit;
-              font-weight: 600;
-              line-height: 12px;
-              background-color: ${color};
-              color: #ffffff;
-              padding: 1px 4px;
-              border-radius: 3px;
-              white-space: nowrap;
-              pointer-events: none;
-              z-index: 10;
-              box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-            }
-          `;
-        }
-      });
-      if (styleEl) {
-        styleEl.innerHTML = css;
-      }
-    };
-
-    awareness.on('change', updateCursorStyles);
-    updateCursorStyles();
-
-    return () => {
-      awareness.off('change', updateCursorStyles);
-    };
-  }, [awareness]);
+  }, []);
 
   useEffect(() => {
     if (!workspaceId) return;
 
-    // 1. Fetch initial snapshot from backend REST API if available
-    fetch(`/api/workspaces/${workspaceId}/snapshot?docName=main`, {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
-      },
-    })
-      .then((res) => (res.status === 200 ? res.json() : null))
-      .then((data) => {
-        if (data && data.yjsStateBase64) {
-          const binary = Uint8Array.from(atob(data.yjsStateBase64), (c) => c.charCodeAt(0));
-          Y.applyUpdate(doc, binary, 'initial-sync');
-        }
-      })
-      .catch((err) => console.warn('Snapshot fetch skipped:', err))
-      .finally(() => setSynced(true));
+    let isSubscribed = true;
 
-    // 2. Set up STOMP over SockJS
-    const socket = new SockJS('/ws');
+    // 2. Set up STOMP over SockJS with factory providing a fresh connection per attempt
     const client = new Client({
-      webSocketFactory: () => socket as any,
+      webSocketFactory: () => new SockJS('/ws'),
       debug: () => {},
-      reconnectDelay: 3000,
+      reconnectDelay: 2000,
       heartbeatIncoming: 4000,
       heartbeatOutgoing: 4000,
     });
 
     stompClientRef.current = client;
 
+    // Helper to flush any queued outgoing updates
+    const flushQueue = () => {
+      if (client.connected && outgoingQueueRef.current.length > 0) {
+        while (outgoingQueueRef.current.length > 0) {
+          const item = outgoingQueueRef.current.shift();
+          if (item) {
+            client.publish(item);
+          }
+        }
+      }
+    };
+
     client.onConnect = () => {
-      // Subscribe to CRDT document updates
+      if (!isSubscribed) return;
+
+      // Subscribe to CRDT document updates & synchronization handshake
       client.subscribe(`/topic/workspace/${workspaceId}/sync`, (message) => {
         try {
           const payload = JSON.parse(message.body);
-          if (payload.senderId !== username && payload.update) {
-            const updateBytes = Uint8Array.from(atob(payload.update), (c) => c.charCodeAt(0));
+
+          // Ignore echoes sent by this client instance
+          if (payload.senderSessionId && payload.senderSessionId === clientSessionId) {
+            return;
+          }
+
+          // Case A: A newly connected peer is requesting catch-up diff (Sync Step 1)
+          if (payload.type === 'sync-step-1' && payload.stateVector) {
+            const peerVector = base64ToUint8Array(payload.stateVector);
+            const diffUpdate = Y.encodeStateAsUpdate(doc, peerVector);
+            if (diffUpdate.byteLength > 0) {
+              client.publish({
+                destination: `/app/workspace/${workspaceId}/sync`,
+                body: JSON.stringify({
+                  type: 'sync-step-2',
+                  docName: 'main',
+                  senderSessionId: clientSessionId,
+                  targetSessionId: payload.senderSessionId,
+                  senderId: username,
+                  update: uint8ArrayToBase64(diffUpdate),
+                }),
+              });
+            }
+            return;
+          }
+
+          // Case B: Response to Sync Step 1 targeted to this client (Sync Step 2)
+          if (payload.type === 'sync-step-2') {
+            if (!payload.targetSessionId || payload.targetSessionId === clientSessionId) {
+              if (payload.update) {
+                const updateBytes = base64ToUint8Array(payload.update);
+                Y.applyUpdate(doc, updateBytes, 'remote');
+              }
+            }
+            return;
+          }
+
+          // Case C: Standard real-time incremental edit from collaborators
+          if (payload.update) {
+            const updateBytes = base64ToUint8Array(payload.update);
             Y.applyUpdate(doc, updateBytes, 'remote');
           }
         } catch (e) {
-          console.error('Error applying remote Yjs update:', e);
+          console.error('Error handling sync message:', e);
         }
       });
 
-      // Subscribe to Yjs Awareness updates (remote cursors & selections)
+      // Subscribe to Yjs Awareness updates (presence/selection)
       client.subscribe(`/topic/workspace/${workspaceId}/awareness`, (message) => {
         try {
           const payload = JSON.parse(message.body);
-          if (payload.senderId !== username && payload.update) {
-            const bytes = Uint8Array.from(atob(payload.update), (c) => c.charCodeAt(0));
+          if (payload.senderSessionId !== clientSessionId && payload.update) {
+            const bytes = base64ToUint8Array(payload.update);
             applyAwarenessUpdate(awareness, bytes, 'remote');
           }
         } catch (e) {
@@ -171,31 +167,103 @@ export function useYjsProvider(workspaceId: string, username: string, userColor:
         body: JSON.stringify({ username, color: userColor }),
       });
 
+      // Step 1: Send current state vector to peers so any active collaborator sends missing deltas
+      const stateVector = Y.encodeStateVector(doc);
+      client.publish({
+        destination: `/app/workspace/${workspaceId}/sync`,
+        body: JSON.stringify({
+          type: 'sync-step-1',
+          docName: 'main',
+          senderSessionId: clientSessionId,
+          senderId: username,
+          stateVector: uint8ArrayToBase64(stateVector),
+        }),
+      });
+
       // Broadcast initial awareness state
       const initialAwarenessUpdate = encodeAwarenessUpdate(awareness, [awareness.clientID]);
       client.publish({
         destination: `/app/workspace/${workspaceId}/awareness`,
         body: JSON.stringify({
+          senderSessionId: clientSessionId,
           senderId: username,
-          update: btoa(String.fromCharCode(...initialAwarenessUpdate)),
+          update: uint8ArrayToBase64(initialAwarenessUpdate),
         }),
       });
+
+      // Flush any queued updates immediately
+      flushQueue();
     };
 
-    client.activate();
+    // 1. Fetch initial snapshot and trailing incremental updates from backend FIRST
+    fetch(`/api/workspaces/${workspaceId}/snapshot?docName=main`, {
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+      },
+    })
+      .then((res) => (res.status === 200 ? res.json() : null))
+      .then((data) => {
+        if (!isSubscribed || !data) return;
 
-    // 3. Listen to local document updates and publish delta to STOMP
+        // Apply saved snapshot if available
+        if (data.yjsStateBase64) {
+          try {
+            const binary = base64ToUint8Array(data.yjsStateBase64);
+            if (binary.byteLength > 4) {
+              Y.applyUpdate(doc, binary, 'initial-sync');
+            }
+          } catch (e) {
+            console.error('Error applying base snapshot update:', e);
+          }
+        }
+
+        // Apply subsequent incremental updates if available
+        if (Array.isArray(data.updatesBase64)) {
+          for (const updateStr of data.updatesBase64) {
+            try {
+              const binary = base64ToUint8Array(updateStr);
+              if (binary.byteLength > 0) {
+                Y.applyUpdate(doc, binary, 'initial-sync');
+              }
+            } catch (e) {
+              console.error('Error applying incremental update from server:', e);
+            }
+          }
+        }
+      })
+      .catch((err) => console.warn('Snapshot fetch skipped:', err))
+      .finally(() => {
+        if (isSubscribed) {
+          setSynced(true);
+          // Activate WebSocket after document is hydrated with backend snapshot
+          client.activate();
+        }
+      });
+
+    // Periodic queue check to guarantee zero stranded messages
+    const queueInterval = setInterval(flushQueue, 250);
+
+    // 3. Listen to local document updates and publish delta immediately
     const handleDocUpdate = (update: Uint8Array, origin: any) => {
       if (origin !== 'remote' && origin !== 'initial-sync') {
-        const base64Update = btoa(String.fromCharCode(...update));
+        const base64Update = uint8ArrayToBase64(update);
+        const payload = {
+          type: 'update',
+          docName: 'main',
+          senderSessionId: clientSessionId,
+          senderId: username,
+          update: base64Update,
+        };
+
         if (client.connected) {
           client.publish({
             destination: `/app/workspace/${workspaceId}/sync`,
-            body: JSON.stringify({
-              docName: 'main',
-              senderId: username,
-              update: base64Update,
-            }),
+            body: JSON.stringify(payload),
+          });
+        } else {
+          outgoingQueueRef.current.push({
+            destination: `/app/workspace/${workspaceId}/sync`,
+            body: JSON.stringify(payload),
           });
         }
       }
@@ -208,11 +276,13 @@ export function useYjsProvider(workspaceId: string, username: string, userColor:
       if (origin !== 'remote') {
         const changedClients = added.concat(updated, removed);
         const update = encodeAwarenessUpdate(awareness, changedClients);
-        const base64Update = btoa(String.fromCharCode(...update));
+        const base64Update = uint8ArrayToBase64(update);
+
         if (client.connected) {
           client.publish({
             destination: `/app/workspace/${workspaceId}/awareness`,
             body: JSON.stringify({
+              senderSessionId: clientSessionId,
               senderId: username,
               update: base64Update,
             }),
@@ -224,13 +294,17 @@ export function useYjsProvider(workspaceId: string, username: string, userColor:
     awareness.on('update', handleAwarenessUpdate);
 
     return () => {
+      isSubscribed = false;
+      clearInterval(queueInterval);
       doc.off('update', handleDocUpdate);
       awareness.off('update', handleAwarenessUpdate);
       if (stompClientRef.current) {
         stompClientRef.current.deactivate();
+        stompClientRef.current = null;
       }
+      outgoingQueueRef.current = [];
     };
-  }, [workspaceId, username, userColor, doc, awareness]);
+  }, [workspaceId, username, userColor, doc, awareness, clientSessionId]);
 
   return { doc, awareness, synced, presenceUsers, stompClient: stompClientRef.current };
 }
