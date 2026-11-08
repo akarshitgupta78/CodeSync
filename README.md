@@ -7,36 +7,60 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 [![Monaco Editor](https://img.shields.io/badge/Monaco%20Editor-0.52-informational.svg)](https://microsoft.github.io/monaco-editor/)
 [![Yjs](https://img.shields.io/badge/CRDT-Yjs%2013-blueviolet.svg)](https://yjs.dev/)
-[![Docker](https://img.shields.io/badge/Docker-Sandboxed%20Execution-2496ED.svg)](https://www.docker.com/)
+[![Docker](https://img.shields.io/badge/Docker-Production%20Ready-2496ED.svg)](https://www.docker.com/)
 
 **CodeSync** is a cloud-native, real-time collaborative code editor and execution platform. It allows developers across the globe to write, review, and execute code simultaneously in a unified document with zero merge conflicts, sub-millisecond local latency, and sandboxed containerized code execution.
 
 ---
 
 ## 📑 Table of Contents
+- [Application Screenshots](#-application-screenshots)
 - [Key Features](#-key-features)
 - [System Architecture](#-system-architecture)
 - [Tech Stack](#-tech-stack)
 - [Project Directory Structure](#-project-directory-structure)
-- [Prerequisites](#-prerequisites)
-- [Getting Started](#-getting-started)
+- [Production Deployment (Docker Compose)](#-production-deployment-docker-compose)
+- [Local Development Setup](#-local-development-setup)
 - [API & WebSocket Specifications](#-api--websocket-specifications)
 - [Sandbox Security Model](#-sandbox-security-model)
-- [Troubleshooting & FAQs](#-troubleshooting--faqs)
+- [Multi-User Collaboration Testing](#-multi-user-collaboration-testing)
+- [License](#-license)
+
+---
+
+## 📸 Application Screenshots
+
+### 1. Authentication & Onboarding
+Clean, modern dual-column login and registration interface featuring an animated dynamic network mesh and typing code teaser.
+
+![Sign In Screen](./docs/screenshots/login-auth.jpg)
+
+### 2. Workspace Management Dashboard
+Quick-start hub to create isolated rooms, join existing sessions via 6-character room codes or share links, and manage active workspaces.
+
+![Workspace Dashboard](./docs/screenshots/dashboard-workspaces.png)
+
+### 3. Collaborative Code Editor & Sandboxed Terminal Execution
+Simultaneous multi-client code editing powered by Monaco Editor and Yjs CRDTs, with live collaborator presence indicators and an isolated Docker-backed execution terminal running scripts in real time.
+
+![Collaborative Editor Room](./docs/screenshots/collaborative-editor.png)
 
 ---
 
 ## ⚡ Key Features
 
 * **Conflict-Free Real-Time Editing:** Leverages **Yjs** Conflict-Free Replicated Data Types (CRDTs). Keystrokes merge mathematically on the client without expensive operational transformations (OT) or server-side AST diffing.
-* **Live Presence & Remote Cursors:** Broadcasts real-time collaborator avatars, typing carets, and color-coded selection highlights via STOMP WebSockets.
+* **Deterministic Hydration & Zero State Loss:** Database snapshots load first via REST, and WebSocket synchronization handshakes execute sequentially, eliminating race conditions and preventing uninitialized state overwrites.
+* **Cross-Platform & Mobile Virtual Keyboard Support:** Strictly enforces uniform `LF` (`\n`) line endings across Windows, Linux, Android, and iOS. Tames mobile IME and Gboard virtual keyboards to prevent phantom line splits or double newlines.
+* **Live Presence & Deduplicated Collaborator Avatars:** Real-time collaborator badges with active presence tracking, deduplicating multi-tab sessions cleanly.
 * **Dual Database Architecture:**
-  * **PostgreSQL:** Relational metadata (Users, Workspaces, Role-based permissions).
-  * **MongoDB:** High-frequency unstructured writes (periodic merged CRDT binary snapshots and incremental delta logs).
+  * **PostgreSQL 16:** Relational metadata (Users, Workspaces, Role-based permissions).
+  * **MongoDB 7:** High-frequency unstructured writes (periodic merged CRDT binary snapshots and incremental delta logs with automatic pruning).
 * **Multi-Node Cluster Scaling:** Uses a **Redis Pub/Sub backplane** to synchronize WebSocket events seamlessly across multiple backend instances.
-* **Sandboxed Code Execution Engine:** Safely runs arbitrary user code (Python, JavaScript/Node.js, etc.) inside ephemeral, resource-constrained Docker containers with complete network isolation (`--network none`).
+* **High-Throughput WebSocket Transport:** Scaled Spring WebSocket frames up to **1MB** and send buffers to **2MB** to support heavy concurrent typing sessions without dropped frames.
+* **Sandboxed Code Execution Engine:** Safely runs arbitrary user code (Python 3, JavaScript/Node.js) inside ephemeral, resource-constrained Docker containers with complete network isolation (`--network none`) and output buffer draining guarantees.
 * **Modern VS Code Experience:** Integrated with **Monaco Editor**, syntax highlighting, smooth scrolling, and dynamic **Dark / Light theme** toggling.
-* **Workspace Management & Access Control:** Role-aware workspace creation, 6-character room codes, deletion with cascading cleanup, and invalid room join protection.
+* **One-Click Deployment:** Fully containerized multi-tier setup with root `docker-compose.yml`, Nginx reverse proxy, and environment-driven configuration.
 
 ---
 
@@ -45,17 +69,21 @@
 ```mermaid
 flowchart TD
     subgraph Clients["Frontend Clients (React 18 + Monaco + Yjs)"]
-        UserA["User A (Browser)"]
-        UserB["User B (Browser)"]
+        UserA["User A (Browser / Mobile)"]
+        UserB["User B (Browser / Laptop)"]
+    end
+
+    subgraph Proxy["Nginx Reverse Proxy (:80)"]
+        Nginx["Nginx (SSL, Static Assets, WebSocket Routing)"]
     end
 
     subgraph Core["Backend Core Cluster (Spring Boot 8082)"]
-        Node1["Spring Boot Node 1<br>(WebSocket Relay)"]
-        Node2["Spring Boot Node 2<br>(WebSocket Relay)"]
+        Node1["Spring Boot Node 1<br>(WebSocket Relay & CRDT Sync)"]
+        Node2["Spring Boot Node 2<br>(WebSocket Relay & CRDT Sync)"]
     end
 
     subgraph Broker["Message Broker & Cache"]
-        Redis["Redis 7 (Pub/Sub Backplane)"]
+        Redis["Redis 7 (Presence & Pub/Sub Backplane)"]
     end
 
     subgraph Storage["Databases"]
@@ -65,11 +93,14 @@ flowchart TD
 
     subgraph Sandbox["Execution Engine (Spring Boot 8081)"]
         Worker["Docker Orchestrator<br>(docker-java API)"]
-        Container["Ephemeral Sandbox Container<br>(Memory Cap: 256MB | Network: None | Timeout: 10s)"]
+        Container["Ephemeral Sandbox Container<br>(Memory: 256MB | Network: None | Timeout: 10s)"]
     end
 
-    UserA <-->|STOMP WebSockets| Node1
-    UserB <-->|STOMP WebSockets| Node2
+    UserA <-->|HTTP / WS| Nginx
+    UserB <-->|HTTP / WS| Nginx
+
+    Nginx -->|Proxy /ws & /api/| Node1
+    Nginx -->|Proxy /api/execute| Worker
 
     Node1 <-->|Redis Pub/Sub Channel| Redis
     Node2 <-->|Redis Pub/Sub Channel| Redis
@@ -77,9 +108,8 @@ flowchart TD
     Node1 -->|JPA / Hibernate| Postgres
     Node1 -->|Document Store| Mongo
 
-    UserA -.->|POST /api/execute| Worker
     Worker -->|Spins up & executes| Container
-    Container -->|Captures stdout/stderr| Worker
+    Container -->|Streams stdout/stderr| Worker
 ```
 
 ---
@@ -88,17 +118,18 @@ flowchart TD
 
 | Domain | Technology | Description |
 | :--- | :--- | :--- |
-| **Frontend** | React 18, TypeScript, Vite | Fast, typed, modular user interface |
-| **Editor** | Monaco Editor (`@monaco-editor/react`) | VS Code's editor engine in the browser |
-| **CRDT Engine** | Yjs, `y-monaco` | Client-side mathematical conflict-free replication |
-| **UI Styling** | Tailwind CSS, Lucide Icons | Responsive, sleek dark-mode IDE interface |
-| **Backend Core** | Spring Boot 3.4.x, Java 21 LTS | REST endpoints, WebSocket message broker, Security |
+| **Frontend** | React 18, TypeScript, Vite | Fast, typed, modular single-page application |
+| **Editor** | Monaco Editor (`@monaco-editor/react`) | VS Code's editor engine embedded in the browser |
+| **CRDT Engine** | Yjs, `y-monaco`, `y-protocols` | Client-side mathematical conflict-free replication |
+| **UI Styling** | Tailwind CSS, Lucide Icons | Responsive, sleek dark/light theme IDE interface |
+| **Backend Core** | Spring Boot 3.4.x, Java 21 LTS | REST endpoints, WebSocket STOMP broker, Spring Security |
 | **Real-time Protocol** | Spring WebSocket, STOMP, SockJS | Bi-directional streaming for deltas and presence |
-| **Authentication** | Spring Security 6, JJWT (HMAC-SHA256) | Stateless token-based auth |
+| **Authentication** | Spring Security 6, JJWT (HMAC-SHA256) | Stateless token-based auth with auto-join room links |
 | **Relational Data** | PostgreSQL 16, Spring Data JPA | Users, workspaces, and role memberships |
-| **CRDT Data Store** | MongoDB 7, Spring Data MongoDB | Binary snapshots (`Uint8Array`) and audit logs |
-| **Clustering Broker**| Redis 7, Spring Data Redis | Pub/Sub cluster backplane |
+| **CRDT Data Store** | MongoDB 7, Spring Data MongoDB | Binary snapshots (`Uint8Array`) and pruned audit logs |
+| **Clustering Broker**| Redis 7, Spring Data Redis | In-memory cache and cluster pub/sub backplane |
 | **Execution Engine** | Spring Boot, `docker-java` SDK | Sandboxed Docker runner with process fallback |
+| **Reverse Proxy** | Nginx (Alpine) | Unified routing for SPA, API, and WebSockets |
 
 ---
 
@@ -106,110 +137,119 @@ flowchart TD
 
 ```
 CodeSync/
-├── infrastructure/               # Local dev setup and database provisioning
-│   ├── docker-compose.yml        # PostgreSQL (5432), MongoDB (27017), Redis (6379)
-│   └── init-scripts/             
-│       ├── postgres-init.sql     # users, workspaces, and workspace_members
-│       └── mongo-init.js         # documents & update logs collections
+├── docker-compose.yml            # Complete 6-service production orchestration
+├── .env.example                  # Environment configuration template
+│
+├── docs/                         # Project documentation assets
+│   └── screenshots/              # UI walkthrough screenshots
+│       ├── collaborative-editor.png
+│       ├── dashboard-workspaces.png
+│       └── login-auth.jpg
 │
 ├── frontend/                     # React 18 + TypeScript + Tailwind CSS UI
-│   ├── public/                   # Favicons and static assets
+│   ├── Dockerfile                # Multi-stage production build (Node 20 -> Nginx Alpine)
+│   ├── nginx.conf                # Reverse proxy for static assets, /api, and /ws
 │   ├── src/
-│   │   ├── assets/               # Dark theme styles & Yjs cursor carets
+│   │   ├── assets/               # Light/Dark themes and Monaco styling
 │   │   ├── components/           
 │   │   │   ├── editor/           # Monaco Editor & Yjs binding (CodeEditor.tsx)
-│   │   │   ├── workspace/        # Sidebar, FileExplorer, ActiveUsersList, ExecutionPanel
+│   │   │   ├── workspace/        # ActiveUsersList, ExecutionPanel
 │   │   │   └── common/           # Navbar, Button, Modal, Loader
-│   │   ├── context/              # AuthContext & WebSocketContext
-│   │   ├── hooks/                # useYjsProvider & useWebSockets
-│   │   ├── services/             # Axios API services (api.ts, auth.ts, workspace.ts)
+│   │   ├── context/              # AuthContext & ThemeContext
+│   │   ├── hooks/                # useYjsProvider (STOMP + CRDT state sync)
+│   │   ├── utils/                # binary.ts (chunked base64 & Uint8Array conversions)
+│   │   ├── services/             # Axios API services (auth, workspace)
 │   │   ├── pages/                # Dashboard, EditorRoom, Login, Register
 │   │   ├── App.tsx               # Main routing & protected routes
 │   │   └── main.tsx              # React DOM entrypoint
-│   ├── package.json
-│   ├── vite.config.ts            # Proxy to ports 8082 and 8081
-│   ├── tailwind.config.js
-│   └── tsconfig.json
+│   └── package.json
 │
 ├── backend-core/                 # Main Spring Boot 3.4.3 Application (Port 8082)
+│   ├── Dockerfile                # Multi-stage container build (Temurin 21)
 │   ├── src/main/java/com/editor/core/
 │   │   ├── config/               # WebSocketConfig, SecurityConfig, RedisConfig
 │   │   ├── controller/           # AuthController, WorkspaceController
-│   │   ├── websocket/            # STOMP message handlers, Session listeners
+│   │   ├── websocket/            # DocumentSyncHandler, WebSocketEventListener
 │   │   ├── service/              # AuthService, WorkspaceService, DocumentSyncService
 │   │   ├── repository/           # PostgreSQL JPA & MongoDB Repositories
 │   │   ├── model/                # JPA entities (User, Workspace) & Mongo Documents
 │   │   ├── dto/                  # Request & response payloads
 │   │   └── security/             # JwtTokenProvider, JwtAuthenticationFilter
-│   ├── src/main/resources/
-│   │   └── application.yml       # PostgreSQL, MongoDB, Redis, JWT config
-│   ├── pom.xml
-│   └── mvnw.cmd                  # Maven Wrapper
+│   └── src/main/resources/
+│       └── application.yml       # PostgreSQL, MongoDB, Redis, JWT config
 │
-└── execution-engine/             # Isolated Code Runner Service (Port 8081)
-    ├── src/main/java/com/editor/execution/
-    │   ├── config/               # DockerClientConfig (docker-java)
-    │   ├── controller/           # /api/execute endpoint
-    │   ├── service/              # Sandboxed Docker orchestrator & local fallback
-    │   └── dto/                  # ExecutionRequest & ExecutionResult
-    ├── src/main/resources/
-    │   └── application.yml       # Memory limits, timeout quotas
-    ├── pom.xml
-    └── mvnw.cmd                  # Maven Wrapper
+├── execution-engine/             # Isolated Code Runner Service (Port 8081)
+│   ├── Dockerfile                # Container build with Docker CLI and runtime dependencies
+│   ├── src/main/java/com/editor/execution/
+│   │   ├── config/               # DockerClientConfig (docker-java SDK)
+│   │   ├── controller/           # /api/execute endpoint
+│   │   ├── service/              # DockerExecutionService (sandboxed container runner)
+│   │   └── dto/                  # ExecutionRequest & ExecutionResult
+│   └── src/main/resources/
+│       └── application.yml       # Memory limits, timeout quotas
+│
+└── infrastructure/               # Database initialization scripts
+    └── init-scripts/             
+        ├── postgres-init.sql     # users, workspaces, and workspace_members
+        └── mongo-init.js         # documents & update logs collections
 ```
 
 ---
 
-## 📋 Prerequisites
+## 🐳 Production Deployment (Docker Compose)
 
-Before running the project, verify that your machine has the following tools installed:
+Deploy the entire CodeSync stack (Frontend, Backend, Execution Engine, PostgreSQL, MongoDB, Redis) in **one command**.
 
-* **Java:** `Java 21 LTS` or higher
-* **Node.js:** `Node v18+` & `npm 9+`
-* **Docker:** Docker Desktop with Docker Compose
+### 1. Configure Environment Variables
+```bash
+cp .env.example .env
+```
+Edit `.env` and set your production secrets:
+```env
+POSTGRES_DB=codesync
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=your_secure_postgres_password_here
+JWT_SECRET=your_32_byte_random_hex_secret_here
+```
+
+### 2. Launch All Services
+```bash
+docker compose up -d --build
+```
+
+### 3. Verify Container Health
+```bash
+docker compose ps
+```
+Open **`http://localhost`** (or your server's public IP) in your browser!
 
 ---
 
-## 🚀 Getting Started
+## 💻 Local Development Setup
 
-### Step 1: Start Database & Broker Infrastructure
-Start the PostgreSQL, MongoDB, and Redis instances with a single command:
+If you prefer to run services individually without containerizing the backends:
+
+### Step 1: Start Database Infrastructure
 ```bash
 cd infrastructure
 docker compose up -d
 ```
-*Verify containers are running:*
-```bash
-docker ps
-```
 
 ### Step 2: Run the Collaboration Backend (`backend-core`)
-Open a new terminal tab and start the main Spring Boot server:
-
-> **Note:** Ensure port `8082` is free before starting.
-
 ```bash
 cd backend-core
 .\mvnw.cmd spring-boot:run
 ```
-*The backend server will start on `http://localhost:8082`.*
+*Backend runs on `http://localhost:8082`.*
 
 ### Step 3: Run the Code Execution Engine (`execution-engine`)
-Open another terminal tab and launch the execution service:
-
-> **Note:** Ensure port `8081` is free before starting.
-
 ```bash
 cd execution-engine
 .\mvnw.cmd spring-boot:run
 ```
-*The execution engine will start on `http://localhost:8081`.*
+*Execution engine runs on `http://localhost:8081`.*
 
 ### Step 4: Run the Frontend Client (`frontend`)
-Open a fourth terminal tab and launch the React development server:
-
-> **Note:** Ensure port `3000` is free before starting.
-
 ```bash
 cd frontend
 npm install
@@ -237,8 +277,8 @@ Open **[http://localhost:3000](http://localhost:3000)** in your browser!
 | `POST` | `/api/workspaces` | Create a new collaborative room | Yes |
 | `GET` | `/api/workspaces/{id}` | Get workspace details (auto-joins as collaborator) | Yes |
 | `DELETE` | `/api/workspaces/{id}` | Delete workspace and associated documents (Admin only) | Yes |
-| `GET` | `/api/workspaces/{id}/snapshot` | Fetch latest merged CRDT snapshot from MongoDB | Yes |
-| `POST` | `/api/workspaces/{id}/snapshot` | Store periodic merged CRDT snapshot | Yes |
+| `GET` | `/api/workspaces/{id}/snapshot` | Fetch initial state: base snapshot + trailing updates | Yes |
+| `POST` | `/api/workspaces/{id}/snapshot` | Store periodic merged CRDT snapshot (rejects empty writes) | Yes |
 
 #### Remote Code Execution (`/api/execute`)
 | Method | Endpoint | Payload | Response |
@@ -248,14 +288,14 @@ Open **[http://localhost:3000](http://localhost:3000)** in your browser!
 ### STOMP WebSocket Topics
 
 * **Client Send Destinations:**
-  * `/app/workspace/{workspaceId}/sync`: Sends binary base64-encoded Yjs updates.
-  * `/app/workspace/{workspaceId}/awareness`: Broadcasts Yjs awareness states (remote carets, name tags, selection ranges).
+  * `/app/workspace/{workspaceId}/sync`: Sends binary base64-encoded Yjs updates and `sync-step-1` catch-up requests.
+  * `/app/workspace/{workspaceId}/awareness`: Broadcasts Yjs awareness states (presence, typing selection ranges).
   * `/app/workspace/{workspaceId}/cursor`: Broadcasts live cursor position `(line, column)`.
   * `/app/workspace/{workspaceId}/join`: Announces collaborator presence in the room.
 * **Client Subscription Destinations:**
-  * `/topic/workspace/{workspaceId}/sync`: Receives peer CRDT deltas.
-  * `/topic/workspace/{workspaceId}/awareness`: Receives peer Yjs awareness states with real-time cursor tracking.
-  * `/topic/workspace/{workspaceId}/presence`: Receives real-time active users list.
+  * `/topic/workspace/{workspaceId}/sync`: Receives peer CRDT deltas and `sync-step-2` diff responses.
+  * `/topic/workspace/{workspaceId}/awareness`: Receives peer Yjs awareness states.
+  * `/topic/workspace/{workspaceId}/presence`: Receives deduplicated active users list.
   * `/topic/workspace/{workspaceId}/cursor`: Receives peer live cursor highlights.
 
 ---
@@ -266,20 +306,20 @@ Executing arbitrary user-submitted code introduces severe Remote Code Execution 
 
 1. **Network Mode:** Explicitly set to `networkMode("none")`. Containers cannot make external HTTP requests, scrape internal networks, or participate in outbound DDoS attacks.
 2. **Memory Limits:** Containers are capped at **256MB** memory and 256MB swap to protect the host against memory exhaustion exploits.
-3. **Execution Timeouts:** Strict enforcement of a **10-second timeout**. Long-running loops or malicious fork-bombs are killed automatically via `kill` commands.
-4. **Lifecycle Cleanup:** Containers are run with `withAutoRemove(true)` and forcefully purged upon process completion.
+3. **Execution Timeouts:** Strict enforcement of a **10-second timeout**. Long-running loops or fork-bombs are killed automatically.
+4. **Lifecycle Cleanup & Stream Draining:** Containers run with `withAutoRemove(true)` and log streams are fully drained before returning execution results.
 
 ---
 
 ## 👥 Multi-User Collaboration Testing
 
-To test real-time collaboration on your local machine:
-1. Open [http://localhost:3000](http://localhost:3000) in **Google Chrome**.
+To test real-time collaboration across multiple devices or browser sessions:
+1. Open [http://localhost:3000](http://localhost:3000) (or your deployed URL) in **Google Chrome**.
 2. Register an account (e.g., `alice`) and create a workspace.
-3. Open an **Incognito Window** (or a separate browser like Microsoft Edge / Firefox) and visit [http://localhost:3000](http://localhost:3000).
-4. Register a second account (e.g., `bob`).
-5. In the second browser, paste the Room ID or room link from `alice`'s session.
-6. Watch both users type simultaneously—keystrokes, remote cursors, and active collaborator badges sync instantaneously with zero merge conflicts!
+3. Click the **"Share Room"** button in the navbar to copy the direct room link.
+4. Open a second browser (or mobile phone browser connected over network).
+5. Register a second account (e.g., `bob`) and join the room link.
+6. Watch both users type simultaneously—keystrokes, remote carets, and active collaborator badges sync instantaneously with zero merge conflicts!
 
 ---
 
