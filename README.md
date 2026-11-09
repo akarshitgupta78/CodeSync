@@ -74,42 +74,46 @@ flowchart TD
     end
 
     subgraph Proxy["Nginx Reverse Proxy (:80)"]
-        Nginx["Nginx (SSL, Static Assets, WebSocket Routing)"]
+        Nginx["Nginx Reverse Proxy<br/>(Static SPA, SSL, WS & API Gateway)"]
     end
 
-    subgraph Core["Backend Core Cluster (Spring Boot 8082)"]
-        Node1["Spring Boot Node 1<br>(WebSocket Relay & CRDT Sync)"]
-        Node2["Spring Boot Node 2<br>(WebSocket Relay & CRDT Sync)"]
+    subgraph Core["Backend Core (Spring Boot :8082)"]
+        Backend["Spring Boot Core Service<br/>(STOMP WebSocket Relay, Auth, CRDT Sync)"]
     end
 
-    subgraph Broker["Message Broker & Cache"]
-        Redis["Redis 7 (Presence & Pub/Sub Backplane)"]
+    subgraph Broker["Clustering & Pub/Sub"]
+        Redis[("Redis 7<br/>Active Presence & Pub/Sub Channel")]
     end
 
     subgraph Storage["Databases"]
-        Postgres[("PostgreSQL 16<br>(Users, Workspaces, Roles)")]
-        Mongo[("MongoDB 7<br>(CRDT Binary Snapshots & Logs)")]
+        Postgres[("PostgreSQL 16<br/>Users, Workspaces, RBAC")]
+        Mongo[("MongoDB 7<br/>CRDT Snapshots & Update Logs")]
     end
 
-    subgraph Sandbox["Execution Engine (Spring Boot 8081)"]
-        Worker["Docker Orchestrator<br>(docker-java API)"]
-        Container["Ephemeral Sandbox Container<br>(Memory: 256MB | Network: None | Timeout: 10s)"]
+    subgraph Sandbox["Execution Engine (:8081)"]
+        Worker["Docker Execution Orchestrator<br/>(Spring Boot + docker-java API)"]
+        Container["Ephemeral Sandbox Container<br/>(Memory: 256MB | Net: None | Timeout: 10s)"]
     end
 
-    UserA <-->|HTTP / WS| Nginx
-    UserB <-->|HTTP / WS| Nginx
+    %% Client to Nginx
+    UserA -->|HTTP / WebSockets| Nginx
+    UserB -->|HTTP / WebSockets| Nginx
 
-    Nginx -->|Proxy /ws & /api/| Node1
+    %% Nginx Routing
+    Nginx -->|Proxy /ws (STOMP WebSockets)| Backend
+    Nginx -->|Proxy /api/auth & /api/workspaces| Backend
     Nginx -->|Proxy /api/execute| Worker
 
-    Node1 <-->|Redis Pub/Sub Channel| Redis
-    Node2 <-->|Redis Pub/Sub Channel| Redis
+    %% Backend Integrations
+    Backend -->|Pub/Sub Events| Redis
+    Redis -->|Broadcast Sync| Backend
+    Backend -->|Spring Data JPA| Postgres
+    Backend -->|Spring Data Mongo| Mongo
 
-    Node1 -->|JPA / Hibernate| Postgres
-    Node1 -->|Document Store| Mongo
-
-    Worker -->|Spins up & executes| Container
-    Container -->|Streams stdout/stderr| Worker
+    %% Sandbox Execution
+    Worker -->|Spins up & injects code| Container
+    Container -->|Captures stdout & stderr| Worker
+    Worker -->|Returns Execution Result| Nginx
 ```
 
 ---
