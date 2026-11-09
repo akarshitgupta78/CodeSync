@@ -92,28 +92,28 @@ flowchart TD
 
     subgraph Sandbox["Execution Engine (:8081)"]
         Worker["Docker Execution Orchestrator<br/>(Spring Boot + docker-java API)"]
-        Container["Ephemeral Sandbox Container<br/>(Memory: 256MB | Net: None | Timeout: 10s)"]
+        Container["Ephemeral Sandbox Container<br/>(Memory: 256MB, Net: None, Timeout: 10s)"]
     end
 
     %% Client to Nginx
-    UserA -->|HTTP / WebSockets| Nginx
-    UserB -->|HTTP / WebSockets| Nginx
+    UserA -->|"HTTP & WebSockets"| Nginx
+    UserB -->|"HTTP & WebSockets"| Nginx
 
     %% Nginx Routing
-    Nginx -->|Proxy /ws (STOMP WebSockets)| Backend
-    Nginx -->|Proxy /api/auth & /api/workspaces| Backend
-    Nginx -->|Proxy /api/execute| Worker
+    Nginx -->|"Proxy /ws (STOMP WebSockets)"| Backend
+    Nginx -->|"Proxy /api (Auth & Workspaces)"| Backend
+    Nginx -->|"Proxy /api/execute"| Worker
 
     %% Backend Integrations
-    Backend -->|Pub/Sub Events| Redis
-    Redis -->|Broadcast Sync| Backend
-    Backend -->|Spring Data JPA| Postgres
-    Backend -->|Spring Data Mongo| Mongo
+    Backend -->|"Pub/Sub Events"| Redis
+    Redis -->|"Broadcast Sync"| Backend
+    Backend -->|"Spring Data JPA"| Postgres
+    Backend -->|"Spring Data Mongo"| Mongo
 
     %% Sandbox Execution
-    Worker -->|Spins up & injects code| Container
-    Container -->|Captures stdout & stderr| Worker
-    Worker -->|Returns Execution Result| Nginx
+    Worker -->|"Spins up container"| Container
+    Container -->|"Streams stdout & stderr"| Worker
+    Worker -->|"Returns Execution Result"| Nginx
 ```
 
 ---
